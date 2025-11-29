@@ -13,11 +13,6 @@ interface ApiResponse<T> {
   data?: T;
 }
 
-interface LoginRequest {
-  email: string;
-  password: string;
-}
-
 interface LoginResponse {
   success: boolean;
   is_otp_sent: boolean;
@@ -47,11 +42,6 @@ interface UserResponse {
   data: UserData;
 }
 
-interface UrlRequest {
-  url: string;
-  is_render: boolean;
-}
-
 interface UrlResponse {
   success: boolean;
   message: string;
@@ -62,11 +52,6 @@ interface UrlResponse {
     url: string;
     is_render: boolean;
   };
-}
-
-interface FlushCacheRequest {
-  url: string;
-  is_render: boolean;
 }
 
 interface FlushCacheResponse {
@@ -108,9 +93,9 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getAccessToken();
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...options.headers,
+    ...(options.headers as Record<string, string>),
   };
 
   if (token) {
@@ -267,11 +252,11 @@ export const appsApi = {
    * Get all apps
    * TODO: Backend needs to implement GET /apps
    */
-  async getAllApps(): Promise<ApiResponse<any[]>> {
+  async getAllApps(): Promise<ApiResponse<unknown[]>> {
     // This endpoint is not shown in Postman screenshots
     // You may need to create this in your backend
     try {
-      return apiRequest<ApiResponse<any[]>>("/apps");
+      return apiRequest<ApiResponse<unknown[]>>("/apps");
     } catch (error) {
       console.warn("GET /apps endpoint not available, using mock data");
       throw error;
@@ -282,9 +267,9 @@ export const appsApi = {
    * Get app by ID
    * TODO: Backend needs to implement GET /apps/:id
    */
-  async getAppById(id: string): Promise<ApiResponse<any>> {
+  async getAppById(id: string): Promise<ApiResponse<unknown>> {
     try {
-      return apiRequest<ApiResponse<any>>(`/apps/${id}`);
+      return apiRequest<ApiResponse<unknown>>(`/apps/${id}`);
     } catch (error) {
       console.warn("GET /apps/:id endpoint not available");
       throw error;
@@ -295,9 +280,9 @@ export const appsApi = {
    * Toggle app mode (native/webview)
    * TODO: Backend needs to implement PATCH /apps/:id/mode
    */
-  async toggleMode(id: string, mode: "native" | "webview"): Promise<ApiResponse<any>> {
+  async toggleMode(id: string, mode: "native" | "webview"): Promise<ApiResponse<unknown>> {
     try {
-      return apiRequest<ApiResponse<any>>(`/apps/${id}/mode`, {
+      return apiRequest<ApiResponse<unknown>>(`/apps/${id}/mode`, {
         method: "PATCH",
         body: JSON.stringify({ mode }),
       });
@@ -314,9 +299,9 @@ export const appsApi = {
   async updateConfig(
     id: string,
     config: { targetUrl?: string; geoFencing?: string; iframeUrl?: string }
-  ): Promise<ApiResponse<any>> {
+  ): Promise<ApiResponse<unknown>> {
     try {
-      return apiRequest<ApiResponse<any>>(`/apps/${id}/config`, {
+      return apiRequest<ApiResponse<unknown>>(`/apps/${id}/config`, {
         method: "PATCH",
         body: JSON.stringify(config),
       });
