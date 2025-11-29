@@ -16,6 +16,10 @@ export interface AppConfig {
    * Comma-separated list of ISO country codes ( "US, CA, CN").
    */
   geoFencing: string;
+  /**
+   * URL for iframe display in dashboard (separate from targetUrl).
+   */
+  iframeUrl?: string;
   lastUpdated: Date;
 }
 
@@ -28,6 +32,7 @@ export const MOCK_APPS: AppConfig[] = [
     mode: "native",
     targetUrl: "https://vest-shell.net/launcher/us",
     geoFencing: "US, CA",
+    iframeUrl: "https://example.com/dashboard-preview",
     lastUpdated: new Date("2025-11-01T10:15:00Z"),
   },
 ];
