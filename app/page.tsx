@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AppConfig, AppMode } from "../types/app";
 import { MOCK_APPS } from "../types/app";
+import { infoApi, authApi } from "../lib/api";
 
 type DashboardApp = AppConfig;
 
@@ -93,6 +94,7 @@ interface ControlCardProps {
   onFlushCache: (id: string) => void;
   onSaveConfig: (id: string) => void;
   onShowIframe?: (id: string) => void;
+  isPreviewOpen?: boolean;
 }
 
 function ControlCard({
@@ -102,6 +104,7 @@ function ControlCard({
   onFlushCache,
   onSaveConfig,
   onShowIframe,
+  isPreviewOpen,
 }: ControlCardProps) {
   const isWebview = app.mode === "webview";
   const isNative = !isWebview;
@@ -319,10 +322,14 @@ function ControlCard({
           <div className="mt-3 sm:mt-4">
             <button
               type="button"
-              onClick={() => onShowIframe(app.id)}
-              className="w-full rounded-lg border border-indigo-400/50 bg-indigo-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-indigo-200 transition-all duration-150 hover:bg-indigo-500/20 sm:rounded-xl sm:px-4 sm:text-xs"
+              onClick={() => onShowIframe(isPreviewOpen ? "" : app.id)}
+              className={`w-full rounded-lg border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] transition-all duration-150 sm:rounded-xl sm:px-4 sm:text-xs ${
+                isPreviewOpen
+                  ? "border-indigo-400/70 bg-indigo-500/20 text-indigo-100"
+                  : "border-indigo-400/50 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/20"
+              }`}
             >
-              View Iframe Preview
+              {isPreviewOpen ? "Hide Preview" : "View Iframe Preview"}
             </button>
           </div>
         )}
@@ -360,8 +367,8 @@ function IframeDisplay({ app, onClose }: IframeDisplayProps) {
   }
 
   return (
-    <div className="flex items-center justify-center rounded-2xl border border-white/10 bg-slate-900/60 p-3 backdrop-blur-xl sm:rounded-3xl sm:p-6">
-      <div className="w-full max-w-md">
+    <div className="flex h-full items-center justify-center rounded-2xl border border-white/10 bg-slate-900/60 p-3 backdrop-blur-xl sm:rounded-3xl sm:p-4 lg:p-6">
+      <div className="w-full max-w-full lg:max-w-md">
         <div className="mb-3 flex flex-col gap-2 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
           <div className="min-w-0">
             <h3 className="text-xs font-semibold text-slate-100 sm:text-sm">Mobile Preview</h3>
@@ -428,19 +435,77 @@ function DashboardGrid() {
   const [apps, setApps] = useState<DashboardApp[]>(() => [...MOCK_APPS]);
   const [now, setNow] = useState<Date>(() => new Date());
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Check authentication on mount
+  const loadApps = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Fetch from /info endpoint (not /apps)
+      const response = await infoApi.getUrl();
+      if (response.success && response.data) {
+        // Map /info response to AppConfig format
+        // is_render: false = native mode, true = webview mode
+        const mode: AppMode = response.data.is_render ? "webview" : "native";
+        const url = response.data.url || "";
+        
+        // Transform to app structure (using first mock app as template)
+        const app: DashboardApp = {
+          ...MOCK_APPS[0], // Use first mock app as base
+          id: response.data.id || MOCK_APPS[0].id,
+          mode: mode,
+          targetUrl: url,
+          iframeUrl: url, // Use same URL for iframe
+          lastUpdated: response.data.updated_at ? new Date(response.data.updated_at) : new Date(),
+        };
+        
+        setApps([app]);
+        setError(null); // Clear any previous errors
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.warn("Failed to load data from /info API, using mock data:", err);
+      
+      // Show specific error message
+      if (errorMessage.includes("Cannot connect")) {
+        setError(
+          `Cannot connect to backend API. Please ensure:\n` +
+          `1. Backend is running at http://192.168.4.13:5001\n` +
+          `2. CORS is configured correctly\n` +
+          `Using mock data as fallback.`
+        );
+      } else if (errorMessage.includes("404") || errorMessage.includes("not found")) {
+        setError(
+          `API endpoint /api/info not found in backend.\n` +
+          `Please ensure GET /api/info endpoint exists.\n` +
+          `Using mock data as fallback.`
+        );
+      } else {
+        setError(`API error: ${errorMessage}. Using mock data as fallback.`);
+      }
+      
+      // Keep using mock data
+      setApps([...MOCK_APPS]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Check authentication on mount and load apps
   useEffect(() => {
-    const token = localStorage.getItem("auth_token");
+    const token = localStorage.getItem("access_token");
     if (!token) {
       router.push("/login");
+      return;
     }
-  }, [router]);
 
+    // Fetch apps on mount
+    loadApps();
+  }, [router, loadApps]);
 
   const handleLogout = () => {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
+    authApi.logout();
     router.push("/login");
   };
 
@@ -456,18 +521,47 @@ function DashboardGrid() {
     [apps],
   );
 
-  const toggleAppMode = (id: string) => {
+  const toggleAppMode = async (id: string) => {
+    const app = apps.find((a) => a.id === id);
+    if (!app) return;
+
+    const newMode = app.mode === "native" ? "webview" : "native";
+    // Map mode to is_render: native = false, webview = true
+    const isRender = newMode === "webview";
+
+    // Optimistic update
     setApps((prev) =>
-      prev.map((app) =>
-        app.id === id
+      prev.map((a) =>
+        a.id === id
           ? {
-              ...app,
-              mode: app.mode === "native" ? "webview" : "native",
+              ...a,
+              mode: newMode,
               lastUpdated: new Date(),
             }
-          : app,
+          : a,
       ),
     );
+
+    try {
+      // Update via /info API with is_render flag
+      await infoApi.createOrUpdateUrl(app.targetUrl || "", isRender);
+      // Reload to get updated data
+      await loadApps();
+    } catch (err) {
+      // Revert on error
+      setApps((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                mode: app.mode, // Revert to original
+              }
+            : a,
+        ),
+      );
+      console.error("Failed to toggle mode:", err);
+      alert("Failed to toggle mode. Please try again.");
+    }
   };
 
   const updateField = (
@@ -500,14 +594,49 @@ function DashboardGrid() {
     );
   };
 
-  const handleFlushCache = (id: string) => {
-    // In a real system this would trigger an API call.
-    touchApp(id);
+  const handleFlushCache = async (id: string) => {
+    const app = apps.find((a) => a.id === id);
+    if (!app || !app.targetUrl) {
+      alert("No URL configured for this app");
+      return;
+    }
+
+    try {
+      await infoApi.flushCache(app.targetUrl, app.mode === "webview");
+      touchApp(id);
+      alert("Cache flushed successfully");
+    } catch (err) {
+      console.error("Failed to flush cache:", err);
+      alert("Failed to flush cache. Please try again.");
+    }
   };
 
-  const handleSaveConfig = (id: string) => {
-    // In a real system this would persist changes via API.
-    touchApp(id);
+  const handleSaveConfig = async (id: string) => {
+    const app = apps.find((a) => a.id === id);
+    if (!app) return;
+
+    try {
+      // Map mode to is_render: native = false, webview = true
+      const isRender = app.mode === "webview";
+      
+      // Update via /info API - use targetUrl or iframeUrl (prefer iframeUrl)
+      const urlToSave = app.iframeUrl || app.targetUrl || "";
+      
+      if (!urlToSave) {
+        alert("Please provide a URL to save");
+        return;
+      }
+
+      // Update URL and is_render via /info API
+      await infoApi.createOrUpdateUrl(urlToSave, isRender);
+      
+      // Reload to get updated data
+      await loadApps();
+      alert("Configuration saved successfully");
+    } catch (err) {
+      console.error("Failed to save config:", err);
+      alert("Failed to save configuration. Please try again.");
+    }
   };
 
   return (
@@ -562,9 +691,27 @@ function DashboardGrid() {
         </header>
 
         <main className="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:gap-4 md:gap-5">
-          <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-2">
-            {apps.map((app) => (
-              <div key={app.id} className="min-w-0">
+          {error && (
+            <div className="col-span-full rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+              {error}
+            </div>
+          )}
+
+          {isLoading ? (
+            <div className="col-span-full flex items-center justify-center py-12">
+              <div className="text-slate-400">Loading apps...</div>
+            </div>
+          ) : (
+            apps.map((app) => (
+            <div
+              key={app.id}
+              className={`grid min-w-0 grid-cols-1 gap-3 sm:gap-4 ${
+                selectedAppId === app.id
+                  ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                  : ""
+              }`}
+            >
+              <div className="min-w-0">
                 <ControlCard
                   app={app}
                   onToggleMode={toggleAppMode}
@@ -572,18 +719,20 @@ function DashboardGrid() {
                   onFlushCache={handleFlushCache}
                   onSaveConfig={handleSaveConfig}
                   onShowIframe={setSelectedAppId}
+                  isPreviewOpen={selectedAppId === app.id}
                 />
               </div>
-            ))}
-          </div>
 
-          {selectedAppId && (
-            <div className="col-span-full flex items-center justify-center">
-              <IframeDisplay
-                app={apps.find((a) => a.id === selectedAppId)!}
-                onClose={() => setSelectedAppId(null)}
-              />
+              {selectedAppId === app.id && (
+                <div className="min-w-0 lg:flex lg:items-start lg:justify-center">
+                  <IframeDisplay
+                    app={app}
+                    onClose={() => setSelectedAppId(null)}
+                  />
+                </div>
+              )}
             </div>
+          ))
           )}
       </main>
       </div>

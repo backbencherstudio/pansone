@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { authApi } from "../../lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -15,21 +16,17 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
 
-    // TODO: Replace with actual API call to NestJS backend
-    // For now, using mock authentication
-    // In production: POST /api/auth/login
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    // Mock credentials (replace with backend validation)
-    if (username === "admin" && password === "admin123") {
-      // Store auth token (in production, this comes from API)
-      const mockToken = "mock_jwt_token_" + Date.now();
-      localStorage.setItem("auth_token", mockToken);
-      localStorage.setItem("auth_user", JSON.stringify({ username, role: "admin" }));
+    try {
+      const response = await authApi.login(email, password);
       
-      router.push("/");
-    } else {
-      setError("Invalid username or password");
+      if (response.success) {
+        router.push("/");
+      } else {
+        setError(response.message || "Invalid email or password");
+        setIsLoading(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
       setIsLoading(false);
     }
   };
@@ -62,20 +59,20 @@ export default function LoginPage() {
 
             <div className="space-y-1.5 sm:space-y-2">
               <label
-                htmlFor="username"
+                htmlFor="email"
                 className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 font-mono sm:text-xs"
               >
-                Username
+                Email
               </label>
               <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
                 className="w-full truncate rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-mono text-slate-100 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] outline-none transition-all duration-200 placeholder:text-slate-500 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/40 sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
-                placeholder="admin"
-                autoComplete="username"
+                placeholder="admin@website.com"
+                autoComplete="email"
               />
             </div>
 
@@ -109,7 +106,7 @@ export default function LoginPage() {
 
           <div className="mt-5 rounded-lg border border-white/5 bg-white/5 px-3 py-2.5 text-[10px] font-mono text-slate-500 sm:mt-6 sm:rounded-xl sm:px-4 sm:py-3 sm:text-[11px]">
             <p className="text-center">
-              Demo: <span className="text-slate-400">admin</span> / <span className="text-slate-400">admin123</span>
+              Demo: <span className="text-slate-400">admin@website.com</span> / <span className="text-slate-400">AdminPassword123!</span>
             </p>
           </div>
         </div>
