@@ -8,6 +8,62 @@ import { infoApi, authApi } from "../lib/api";
 
 type DashboardApp = AppConfig;
 
+// Toast notification system
+interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info";
+}
+
+function ToastContainer({ toasts, onRemove }: { toasts: Toast[]; onRemove: (id: string) => void }) {
+  return (
+    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`min-w-[300px] rounded-lg border px-4 py-3 text-sm font-medium shadow-lg backdrop-blur-xl transition-all duration-300 ${
+            toast.type === "success"
+              ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
+              : toast.type === "error"
+              ? "border-rose-500/50 bg-rose-500/10 text-rose-200"
+              : "border-indigo-500/50 bg-indigo-500/10 text-indigo-200"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span>{toast.message}</span>
+            <button
+              onClick={() => onRemove(toast.id)}
+              className="text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useToast() {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
+    const id = Math.random().toString(36).substring(7);
+    setToasts((prev) => [...prev, { id, message, type }]);
+    
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
+
+  const removeToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  return { toasts, showToast, removeToast };
+}
+
 const formatTime = (date: Date): string =>
   date.toLocaleTimeString(undefined, {
     hour: "2-digit",
@@ -437,6 +493,7 @@ function DashboardGrid() {
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { toasts, showToast, removeToast } = useToast();
 
   const loadApps = useCallback(async () => {
     setIsLoading(true);
@@ -529,7 +586,7 @@ function DashboardGrid() {
     // Map mode to is_render: native = false, webview = true
     const isRender = newMode === "webview";
 
-    // Optimistic update
+    // Optimistic update - instant state update
     setApps((prev) =>
       prev.map((a) =>
         a.id === id
@@ -545,8 +602,7 @@ function DashboardGrid() {
     try {
       // Update via /info API with is_render flag
       await infoApi.createOrUpdateUrl(app.targetUrl || "", isRender);
-      // Reload to get updated data
-      await loadApps();
+      // No reload - state already updated optimistically
     } catch (err) {
       // Revert on error
       setApps((prev) =>
@@ -560,7 +616,7 @@ function DashboardGrid() {
         ),
       );
       console.error("Failed to toggle mode:", err);
-      alert("Failed to toggle mode. Please try again.");
+      showToast("Failed to toggle mode. Please try again.", "error");
     }
   };
 
@@ -597,17 +653,17 @@ function DashboardGrid() {
   const handleFlushCache = async (id: string) => {
     const app = apps.find((a) => a.id === id);
     if (!app || !app.targetUrl) {
-      alert("No URL configured for this app");
+      showToast("No URL configured for this app", "error");
       return;
     }
 
     try {
       await infoApi.flushCache(app.targetUrl, app.mode === "webview");
       touchApp(id);
-      alert("Cache flushed successfully");
+      showToast("Cache flushed successfully", "success");
     } catch (err) {
       console.error("Failed to flush cache:", err);
-      alert("Failed to flush cache. Please try again.");
+      showToast("Failed to flush cache. Please try again.", "error");
     }
   };
 
@@ -623,24 +679,27 @@ function DashboardGrid() {
       const urlToSave = app.iframeUrl || app.targetUrl || "";
       
       if (!urlToSave) {
-        alert("Please provide a URL to save");
+        showToast("Please provide a URL to save", "error");
         return;
       }
 
       // Update URL and is_render via /info API
       await infoApi.createOrUpdateUrl(urlToSave, isRender);
       
-      // Reload to get updated data
-      await loadApps();
-      alert("Configuration saved successfully");
+      // Update lastUpdated timestamp
+      touchApp(id);
+      
+      // Show success toast
+      showToast("Configuration saved successfully", "success");
     } catch (err) {
       console.error("Failed to save config:", err);
-      alert("Failed to save configuration. Please try again.");
+      showToast("Failed to save configuration. Please try again.", "error");
     }
   };
 
   return (
     <div className="relative min-h-screen bg-slate-950 text-slate-200">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,rgba(99,102,241,0.25),transparent_55%),radial-gradient(circle_at_bottom,rgba(16,185,129,0.2),transparent_60%)]" />
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-4 px-3 py-4 sm:gap-6 sm:px-4 sm:py-6 lg:px-8 lg:py-10">
         <header className="flex min-w-0 flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-2xl shadow-[0_0_60px_-20px_rgba(15,118,235,0.35)] sm:gap-4 sm:rounded-3xl sm:p-5 md:flex-row md:items-center md:justify-between md:gap-6">
